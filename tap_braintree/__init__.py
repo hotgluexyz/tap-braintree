@@ -9,7 +9,12 @@ import braintree
 import singer
 
 from singer import utils
-from .transform import transform_row
+from tap_braintree.transform import transform_row
+from singer.catalog import Catalog, CatalogEntry, Schema
+from singer import metadata
+import json
+import sys
+
 
 
 CONFIG = {}
@@ -197,10 +202,59 @@ def sync_transactions():
     singer.write_state(STATE)
 
 
+def load_schema(tap_stream_id):
+    path = "schemas/{}.json".format(tap_stream_id)
+    schema = utils.load_json(get_abs_path(path))
+    return schema
+
+
+def load_metadata(schema, key_properties, replication_key):
+    replication_method = 'INCREMENTAL' if replication_key else 'FULL_TABLE'
+    mdata = metadata.new()
+
+    mdata = metadata.write(mdata, (), 'table-key-properties', key_properties)
+    mdata = metadata.write(mdata, (), 'forced-replication-method', replication_method)
+
+    if replication_key:
+        mdata = metadata.write(mdata, (), 'valid-replication-keys', [replication_key])
+
+    for field_name in schema['properties'].keys():
+        if field_name in key_properties or field_name == replication_key:
+            mdata = metadata.write(mdata, ('properties', field_name), 'inclusion', 'automatic')
+        else:
+            mdata = metadata.write(mdata, ('properties', field_name), 'inclusion', 'available')
+
+    return metadata.to_list(mdata)
+
+
 def do_sync():
     logger.info("Starting sync")
     sync_transactions()
     logger.info("Sync completed")
+
+
+def do_discover():
+    """Generates a JSON schema for each stream."""
+    catalog = {
+        'streams': []
+    }
+    
+    for filename in os.listdir(get_abs_path('schemas')):
+        stream_name = filename.replace('.json', '')
+        key_properties = ['id']
+        replication_key = 'updated_at'
+        schema = load_schema(stream_name)
+        mdata = load_metadata(schema, key_properties, replication_key)
+
+        entry = {
+            'stream': stream_name,
+            'tap_stream_id': stream_name,
+            'schema': schema,
+            'metadata': mdata
+        }
+        catalog["streams"].append(entry)
+
+    json.dump(catalog, sys.stdout, indent=4)
 
 
 @utils.handle_top_exception(logger)
@@ -220,6 +274,10 @@ def main():
 
     if args.state:
         STATE.update(args.state)
+    
+    if args.discover:
+        do_discover()
+        return
 
     try:
         do_sync()

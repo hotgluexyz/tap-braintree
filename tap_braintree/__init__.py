@@ -108,12 +108,11 @@ def sync_transactions():
         latest_start_date
     ))
 
-    visited_transaction_ids = set()
-
     # increment through each day (20k results max from api)
     for start, end in daterange(period_start, period_end):
 
         end = min(end, period_end)
+        end -= timedelta(minutes=1)
 
         data = braintree.Transaction.search(
             braintree.TransactionSearch.created_at.between(start, end))
@@ -127,11 +126,6 @@ def sync_transactions():
         row_skipped_count = 0
 
         for row in data:
-            if row.id in visited_transaction_ids:
-                continue
-
-            visited_transaction_ids.add(row.id)
-
             # Ensure updated_at consistency
             if not getattr(row, 'updated_at'):
                 row.updated_at = row.created_at

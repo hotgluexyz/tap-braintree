@@ -112,6 +112,7 @@ def sync_transactions():
     for start, end in daterange(period_start, period_end):
 
         end = min(end, period_end)
+        end -= timedelta(minutes=1)
 
         data = braintree.Transaction.search(
             braintree.TransactionSearch.created_at.between(start, end))
